@@ -140,16 +140,24 @@ public class BankPlugin extends Plugin
 
 		forceRightClickFlag = false;
 		MenuEntry[] menuEntries = client.getMenuEntries();
-		for (MenuEntry entry : menuEntries)
-		{
-			if ((entry.getOption().equals(DEPOSIT_WORN) && config.rightClickBankEquip())
-				|| (entry.getOption().equals(DEPOSIT_INVENTORY) && config.rightClickBankInventory())
-				|| (entry.getOption().equals(DEPOSIT_LOOT) && config.rightClickBankLoot()))
-			{
-				event.setForceRightClick(true);
-				return;
-			}
+		MenuShouldclickHelper(event, menuEntries);
+	}
+
+	private void MenuShouldclickHelper(MenuShouldLeftClick event, MenuEntry[] menuEntries) {
+		for (MenuEntry entry : menuEntries) {
+			if (isMenuClick(event, entry)) return;
 		}
+	}
+
+	private boolean isMenuClick(MenuShouldLeftClick event, MenuEntry entry) {
+		if ((entry.getOption().equals(DEPOSIT_WORN) && config.rightClickBankEquip())
+			|| (entry.getOption().equals(DEPOSIT_INVENTORY) && config.rightClickBankInventory())
+			|| (entry.getOption().equals(DEPOSIT_LOOT) && config.rightClickBankLoot()))
+		{
+			event.setForceRightClick(true);
+			return true;
+		}
+		return false;
 	}
 
 	@Subscribe
@@ -230,44 +238,27 @@ public class BankPlugin extends Plugin
 		final long haPrice = prices.getHighAlchPrice();
 
 		String strCurrentTab = "";
-		if (config.showGE() && gePrice != 0)
-		{
+		strCurrentTab = getString(gePrice, strCurrentTab, config.showGE(), config.showHA(), "EX: ");
+
+		strCurrentTab = getString(haPrice, strCurrentTab, config.showHA(), config.showGE(), "HA: ");
+
+		return strCurrentTab;
+	}
+
+	private String getString(long gePrice, String strCurrentTab, boolean b, boolean b2, String s) {
+		if (b && gePrice != 0) {
 			strCurrentTab += " (";
 
-			if (config.showHA())
-			{
-				strCurrentTab += "EX: ";
+			if (b2) {
+				strCurrentTab += s;
 			}
 
-			if (config.showExact())
-			{
+			if (config.showExact()) {
 				strCurrentTab += QuantityFormatter.formatNumber(gePrice) + ")";
-			}
-			else
-			{
+			} else {
 				strCurrentTab += QuantityFormatter.quantityToStackSize(gePrice) + ")";
 			}
 		}
-
-		if (config.showHA() && haPrice != 0)
-		{
-			strCurrentTab += " (";
-
-			if (config.showGE())
-			{
-				strCurrentTab += "HA: ";
-			}
-
-			if (config.showExact())
-			{
-				strCurrentTab += QuantityFormatter.formatNumber(haPrice) + ")";
-			}
-			else
-			{
-				strCurrentTab += QuantityFormatter.quantityToStackSize(haPrice) + ")";
-			}
-		}
-
 		return strCurrentTab;
 	}
 
@@ -364,55 +355,67 @@ public class BankPlugin extends Plugin
 		}
 
 		final String op = matcher.group("op");
-		if (op != null)
-		{
-			long compare;
-			try
-			{
-				compare = QuantityFormatter.parseQuantity(matcher.group("num"));
-			}
-			catch (ParseException e)
-			{
-				return false;
-			}
+        Boolean compare = getaBooleanVar(matcher, value, op);
+        if (compare != null) return compare;
 
-			switch (op)
-			{
-				case ">":
-					return value > compare;
-				case "<":
-					return value < compare;
-				case "=":
-					return value == compare;
-				case ">=":
-					return value >= compare;
-				case "<=":
-					return value <= compare;
-			}
-		}
-
-		final String num1 = matcher.group("num1");
+        final String num1 = matcher.group("num1");
 		final String num2 = matcher.group("num2");
-		if (num1 != null && num2 != null)
-		{
-			long compare1, compare2;
-			try
-			{
-				compare1 = QuantityFormatter.parseQuantity(num1);
-				compare2 = QuantityFormatter.parseQuantity(num2);
-			}
-			catch (ParseException e)
-			{
-				return false;
-			}
+        Boolean compare1 = getaBoolean(value, num1, num2);
+        if (compare1 != null) return compare1;
 
-			return compare1 <= value && compare2 >= value;
-		}
-
-		return false;
+        return false;
 	}
 
-	private Multiset<Integer> getBankItemSet()
+    private Boolean getaBoolean(long value, String num1, String num2) {
+        if (num1 != null && num2 != null)
+        {
+            long compare1, compare2;
+            try
+            {
+                compare1 = QuantityFormatter.parseQuantity(num1);
+                compare2 = QuantityFormatter.parseQuantity(num2);
+            }
+            catch (ParseException e)
+            {
+                return false;
+            }
+
+            return compare1 <= value && compare2 >= value;
+        }
+        return null;
+    }
+
+    private Boolean getaBooleanVar(Matcher matcher, long value, String op) {
+        if (op != null)
+        {
+            long compare;
+            try
+            {
+                compare = QuantityFormatter.parseQuantity(matcher.group("num"));
+            }
+            catch (ParseException e)
+            {
+                return false;
+            }
+
+            switch (op)
+            {
+                case ">":
+                    return value > compare;
+                case "<":
+                    return value < compare;
+                case "=":
+                    return value == compare;
+                case ">=":
+                    return value >= compare;
+                case "<=":
+                    return value <= compare;
+            }
+        }
+        return null;
+    }
+
+    private Multiset<Integer> getBankItemSet()
 	{
 		ItemContainer itemContainer = client.getItemContainer(InventoryID.BANK);
 		if (itemContainer == null)
