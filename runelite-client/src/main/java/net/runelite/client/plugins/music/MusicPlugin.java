@@ -137,7 +137,7 @@ public class MusicPlugin extends Plugin
 	@Subscribe
 	public void onGameStateChanged(GameStateChanged gameStateChanged)
 	{
-		if (gameStateChanged.getGameState() == GameState.LOGIN_SCREEN)
+		if (gameStateChanged.getGameState().equals(GameState.LOGIN_SCREEN))
 		{
 			// Reset music filter on logout
 			currentMusicFilter = MusicState.ALL;
@@ -255,7 +255,7 @@ public class MusicPlugin extends Plugin
 
 	private boolean isChatboxOpen()
 	{
-		return searchInput != null && chatboxPanelManager.getCurrentInput() == searchInput;
+		return chatboxPanelManager.getCurrentInput().equals(searchInput);
 	}
 
 	private String getChatboxInput()
@@ -324,7 +324,7 @@ public class MusicPlugin extends Plugin
 
 		Collection<Widget> relevantTracks = tracks.stream()
 			.filter(w -> w.getText().toLowerCase().contains(filter))
-			.filter(w -> currentMusicFilter == MusicState.ALL || w.getTextColor() == currentMusicFilter.getColor())
+			.filter(w -> currentMusicFilter.equals(MusicState.ALL) || w.getTextColor() == currentMusicFilter.getColor())
 			.collect(Collectors.toList());
 
 		// Original music track list has a little offset
@@ -405,187 +405,170 @@ public class MusicPlugin extends Plugin
 		}
 	}
 
+	private boolean nullifyMusicSlider(MusicSlider slider){
+		Widget icon = client.getWidget(slider.getWidgetID());
+		if (icon == null)
+		{
+			return false;
+		}
+
+		if (slider.getHandle() != null)
+		{
+			{
+				Widget handle = slider.getHandle();
+				Widget parent = handle.getParent();
+				if (parent == null)
+				{
+					return true;
+				}
+				else
+				{
+					Widget[] siblings = parent.getChildren();
+					if (siblings == null || handle.getIndex() >= siblings.length || !siblings[handle.getIndex()].equals(handle))
+					{
+						return true;
+					}
+					siblings[slider.getTrack().getIndex()] = null;
+					siblings[handle.getIndex()] = null;
+				}
+			}
+
+			Object[] init = icon.getOnLoadListener();
+			init[1] = slider.getWidgetID().getId();
+
+			// Read the var transmit triggers and rerun options_allsounds
+			client.runScript(init);
+			slider.setHandle(null);
+			slider.setTrack(null);
+		}
+		return true;
+	}
+
 	private void teardownMusicOptions()
 	{
 		for (MusicSlider slider : MusicSlider.values())
 		{
-			Widget icon = client.getWidget(slider.getWidgetID());
-			if (icon == null)
-			{
+			if (!nullifyMusicSlider(slider))
 				return;
-			}
-
-			if (slider.getHandle() != null)
-			{
-				{
-					Widget handle = slider.getHandle();
-					Widget parent = handle.getParent();
-					if (parent == null)
-					{
-						continue;
-					}
-					else
-					{
-						Widget[] siblings = parent.getChildren();
-						if (siblings == null || handle.getIndex() >= siblings.length || siblings[handle.getIndex()] != handle)
-						{
-							continue;
-						}
-						siblings[slider.getTrack().getIndex()] = null;
-						siblings[handle.getIndex()] = null;
-					}
-				}
-
-				Object[] init = icon.getOnLoadListener();
-				init[1] = slider.getWidgetID().getId();
-
-				// Readd the var transmit triggers and rerun options_allsounds
-				client.runScript(init);
-				slider.setHandle(null);
-				slider.setTrack(null);
-			}
 		}
 	}
 
 	private void updateMusicOptions()
 	{
-		for (MusicSlider slider : MusicSlider.values())
+		for (MusicSlider slider : MusicSlider.values()) {
+			if (setupMusicSlider(slider)) return;
+		}
+	}
+
+	private boolean setupMusicSlider(MusicSlider slider) {
+		Widget icon = client.getWidget(slider.getWidgetID());
+		if (icon == null)
 		{
-			Widget icon = client.getWidget(slider.getWidgetID());
-			if (icon == null)
+			return true;
+		}
+
+		Widget handle = slider.getHandle();
+		handle = getWidget(handle);
+		if (handle == null)
+		{
+			Object[] init = icon.getOnLoadListener();
+			icon.setVarTransmitTrigger((int[]) null);
+
+			Widget track = icon.getParent().createChild(-1, WidgetType.TEXT);
+			slider.setTrack(track);
+			handle = icon.getParent().createChild(-1, WidgetType.GRAPHIC);
+			slider.setHandle(handle);
+
 			{
-				return;
+				// First widget of the track
+				int wid = (Integer) init[2];
+				Widget w = client.getWidget(WidgetInfo.TO_GROUP(wid), WidgetInfo.TO_CHILD(wid));
+
+				track.setOriginalX(w.getRelativeX());
+				track.setOriginalY(w.getRelativeY());
+			}
+			{
+				// Last widget of the track
+				int wid = (Integer) init[6];
+				Widget w = client.getWidget(WidgetInfo.TO_GROUP(wid), WidgetInfo.TO_CHILD(wid));
+
+				track.setOriginalWidth((w.getRelativeX() + w.getWidth()) - track.getOriginalX());
 			}
 
-			Widget handle = slider.getHandle();
-			if (handle != null)
+			track.setOriginalHeight(16);
+			track.setNoClickThrough(true);
+			track.revalidate();
+
+			handle.setSpriteId(SpriteID.OPTIONS_ZOOM_SLIDER_THUMB);
+			handle.setOriginalWidth(16);
+			handle.setOriginalHeight(16);
+			handle.setClickMask(WidgetConfig.DRAG);
+
+			JavaScriptCallback move = ev ->
 			{
-				Widget parent = handle.getParent();
-				if (parent == null)
+				int newVal = ((ev.getMouseX() - MusicSlider.PADDING - (slider.getHandle().getWidth() / 2)) * slider.getMax())
+					/ slider.getWidth();
+				if (newVal < 0)
+				{
+					newVal = 0;
+				}
+				if (newVal > slider.getMax())
+				{
+					newVal = slider.getMax();
+				}
+
+				// We store +1 so we can tell the difference between 0 and muted
+				slider.getSetter().accept(musicConfig, newVal + 1);
+				applyMusicVolumeConfig();
+			};
+
+			track.setOnClickListener(move);
+			track.setOnHoldListener(move);
+			track.setOnReleaseListener(move);
+			track.setHasListener(true);
+
+			client.runScript(ScriptID.OPTIONS_ALLSOUNDS, -1, init[2], init[3], init[4], init[5], init[6]);
+		}
+
+		int value = slider.getGetter().applyAsInt(musicConfig) - 1;
+		if (value <= -1)
+		{
+			// Use the vanilla value
+			value = ((4 - client.getVar(slider.getVar())) * slider.getMax()) / 4;
+		}
+
+		int newX = ((value * slider.getWidth()) / slider.getMax()) + slider.getX();
+		slider.getHandle().setOriginalX(newX);
+		slider.getHandle().setOriginalY(slider.getTrack().getOriginalY());
+		slider.getHandle().revalidate();
+		return false;
+	}
+
+	private Widget getWidget(Widget handle) {
+		if (handle != null)
+		{
+			Widget parent = handle.getParent();
+			if (parent == null)
+			{
+				handle = null;
+			}
+			else
+			{
+				Widget[] siblings = parent.getChildren();
+				if (siblings == null || handle.getIndex() >= siblings.length || !siblings[handle.getIndex()].equals(handle))
 				{
 					handle = null;
 				}
-				else
-				{
-					Widget[] siblings = parent.getChildren();
-					if (siblings == null || handle.getIndex() >= siblings.length || siblings[handle.getIndex()] != handle)
-					{
-						handle = null;
-					}
-				}
 			}
-			if (handle == null)
-			{
-				Object[] init = icon.getOnLoadListener();
-				icon.setVarTransmitTrigger((int[]) null);
-
-				Widget track = icon.getParent().createChild(-1, WidgetType.TEXT);
-				slider.setTrack(track);
-				handle = icon.getParent().createChild(-1, WidgetType.GRAPHIC);
-				slider.setHandle(handle);
-
-				{
-					// First widget of the track
-					int wid = (Integer) init[2];
-					Widget w = client.getWidget(WidgetInfo.TO_GROUP(wid), WidgetInfo.TO_CHILD(wid));
-
-					track.setOriginalX(w.getRelativeX());
-					track.setOriginalY(w.getRelativeY());
-				}
-				{
-					// Last widget of the track
-					int wid = (Integer) init[6];
-					Widget w = client.getWidget(WidgetInfo.TO_GROUP(wid), WidgetInfo.TO_CHILD(wid));
-
-					track.setOriginalWidth((w.getRelativeX() + w.getWidth()) - track.getOriginalX());
-				}
-
-				track.setOriginalHeight(16);
-				track.setNoClickThrough(true);
-				track.revalidate();
-
-				handle.setSpriteId(SpriteID.OPTIONS_ZOOM_SLIDER_THUMB);
-				handle.setOriginalWidth(16);
-				handle.setOriginalHeight(16);
-				handle.setClickMask(WidgetConfig.DRAG);
-
-				JavaScriptCallback move = ev ->
-				{
-					int newVal = ((ev.getMouseX() - MusicSlider.PADDING - (slider.getHandle().getWidth() / 2)) * slider.getMax())
-						/ slider.getWidth();
-					if (newVal < 0)
-					{
-						newVal = 0;
-					}
-					if (newVal > slider.getMax())
-					{
-						newVal = slider.getMax();
-					}
-
-					// We store +1 so we can tell the difference between 0 and muted
-					slider.getSetter().accept(musicConfig, newVal + 1);
-					applyMusicVolumeConfig();
-				};
-
-				track.setOnClickListener(move);
-				track.setOnHoldListener(move);
-				track.setOnReleaseListener(move);
-				track.setHasListener(true);
-
-				client.runScript(ScriptID.OPTIONS_ALLSOUNDS, -1, init[2], init[3], init[4], init[5], init[6]);
-			}
-
-			int value = slider.getGetter().applyAsInt(musicConfig) - 1;
-			if (value <= -1)
-			{
-				// Use the vanilla value
-				value = ((4 - client.getVar(slider.getVar())) * slider.getMax()) / 4;
-			}
-
-			int newX = ((value * slider.getWidth()) / slider.getMax()) + slider.getX();
-			slider.getHandle().setOriginalX(newX);
-			slider.getHandle().setOriginalY(slider.getTrack().getOriginalY());
-			slider.getHandle().revalidate();
 		}
+		return handle;
 	}
 
 	@Subscribe
 	public void onScriptCallbackEvent(ScriptCallbackEvent ev)
 	{
-		switch (ev.getEventName())
-		{
-			case "optionsAllSounds":
-				// We have to override this script because it gets invoked periodically from the server
-				client.getIntStack()[client.getIntStackSize() - 1] = -1;
-		}
-	}
-
-	@Subscribe
-	public void onAreaSoundEffectPlayed(AreaSoundEffectPlayed areaSoundEffectPlayed)
-	{
-		Actor source = areaSoundEffectPlayed.getSource();
-		int soundId = areaSoundEffectPlayed.getSoundId();
-		if (source == client.getLocalPlayer()
-			&& musicConfig.muteOwnAreaSounds())
-		{
-			areaSoundEffectPlayed.consume();
-		}
-		else if (source != client.getLocalPlayer()
-			&& (source instanceof Player || (source == null && SOURCELESS_PLAYER_SOUNDS.contains(soundId)))
-			&& musicConfig.muteOtherAreaSounds())
-		{
-			areaSoundEffectPlayed.consume();
-		}
-		else if (source instanceof NPC
-			&& musicConfig.muteNpcAreaSounds())
-		{
-			areaSoundEffectPlayed.consume();
-		}
-		else if (source == null
-			&& !SOURCELESS_PLAYER_SOUNDS.contains(soundId)
-			&& musicConfig.muteEnvironmentAreaSounds())
-		{
-			areaSoundEffectPlayed.consume();
+		if ("optionsAllSounds".equals(ev.getEventName())) {// We have to override this script because it gets invoked periodically from the server
+			client.getIntStack()[client.getIntStackSize() - 1] = -1;
 		}
 	}
 }
